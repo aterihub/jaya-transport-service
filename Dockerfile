@@ -1,37 +1,38 @@
-# Stage 1: Build the Go application
-FROM golang:alpine AS builder
+###################
+# BUILD
+###################
 
-# Set environment variables for cross-compilation and static linking
+FROM golang:1.23-alpine AS builder
+
 ENV GOOS=linux
 ENV CGO_ENABLED=0
 
-# Set the Current Working Directory inside the container
 WORKDIR /app
 
-# Copy go.mod and go.sum files
+# Manifests first so the module download layer survives source-only changes.
 COPY go.mod go.sum ./
-
-# Download all dependencies. Dependencies will be cached if the go.mod and go.sum files are not changed
 RUN go mod download
 
-# Copy the source code into the container
 COPY . .
 
-# Build the Go app
-RUN go build -o jaya-transport-service
+RUN go build -ldflags="-s -w" -o jaya-transport-service
 
-# Stage 2: Run the Go application
-FROM alpine:latest
+###################
+# RUN
+###################
 
-# Install any required dependencies
-RUN apk --no-cache add ca-certificates
+FROM alpine:3.20
 
-# Set the Current Working Directory inside the container
-WORKDIR /root/
+RUN apk --no-cache add ca-certificates tzdata \
+  && adduser -D -H -u 10001 app
 
-# Copy the Pre-built binary file from the previous stage
+WORKDIR /app
+
 COPY --from=builder /app/jaya-transport-service .
 
+USER app
 
-# Command to run the executable
+# Purely an MQTT/HTTP client -- it opens no listening socket, so there is
+# nothing to EXPOSE and no endpoint to health-check. Liveness is inferred from
+# the process staying alive; it log.Fatalf()s on any failed startup dependency.
 CMD ["./jaya-transport-service"]
